@@ -1,0 +1,8 @@
+ros-indigo-ackermann-controller (0.1.1-0saucy) saucy; urgency=high
+
+  * Initial version of ackermann_controller
+  * Contributors: Vincent Rousseau
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Tue, 30 Aug 2016 22:00:00 -0000
+
+
