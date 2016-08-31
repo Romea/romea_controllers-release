@@ -1,1 +1,24 @@
+## romea_controllers (indigo) - 0.1.1-0
+
+The packages in the `romea_controllers` repository were released into the `indigo` distro by running `/usr/bin/bloom-release --rosdistro indigo --track indigo romea_controllers --edit` on `Wed, 31 Aug 2016 14:03:15 -0000`
+
+The `ackermann_controller` package was released.
+
+Version of package(s) in repository `romea_controllers`:
+
+- upstream repository: https://github.com/Romea/romea_controllers.git
+- release repository: unknown
+- rosdistro version: `null`
+- old version: `null`
+- new version: `0.1.1-0`
+
+Versions of tools used:
+
+- bloom version: `0.5.22`
+- catkin_pkg version: `0.2.10`
+- rosdep version: `0.11.5`
+- rosdistro version: `0.4.7`
+- vcstools version: `0.1.38`
+
+
 # romea_controllers-release
