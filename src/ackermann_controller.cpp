@@ -6,66 +6,9 @@
 
 #include <boost/assign.hpp>
 
+#include <urdf_vehicle_kinematic/urdf_vehicle_kinematic.h>
+
 #include <ackermann_controller/ackermann_controller.h>
-
-static double euclideanOfVectors(const urdf::Vector3& vec1, const urdf::Vector3& vec2)
-{
-  return std::sqrt(std::pow(vec1.x-vec2.x,2) +
-                   std::pow(vec1.y-vec2.y,2) +
-                   std::pow(vec1.z-vec2.z,2));
-}
-
-/*
- * \brief Check if the link is modeled as a cylinder
- * \param link Link
- * \return true if the link is modeled as a Cylinder; false otherwise
- */
-static bool isCylinder(const boost::shared_ptr<const urdf::Link>& link)
-{
-  if (!link)
-  {
-    ROS_ERROR("Link == NULL.");
-    return false;
-  }
-
-  if (!link->collision)
-  {
-    ROS_ERROR_STREAM("Link " << link->name << " does not have collision description. Add collision description for link to urdf.");
-    return false;
-  }
-
-  if (!link->collision->geometry)
-  {
-    ROS_ERROR_STREAM("Link " << link->name << " does not have collision geometry description. Add collision geometry description for link to urdf.");
-    return false;
-  }
-
-  if (link->collision->geometry->type != urdf::Geometry::CYLINDER)
-  {
-    ROS_ERROR_STREAM("Link " << link->name << " does not have cylinder geometry");
-    return false;
-  }
-
-  return true;
-}
-
-/*
- * \brief Get the wheel radius
- * \param [in]  wheel_link   Wheel link
- * \param [out] wheel_radius Wheel radius [m]
- * \return true if the wheel radius was found; false otherwise
- */
-static bool getWheelRadius(const boost::shared_ptr<const urdf::Link>& wheel_link, double& wheel_radius)
-{
-  if (!isCylinder(wheel_link))
-  {
-    ROS_ERROR_STREAM("Wheel link " << wheel_link->name << " is NOT modeled as a cylinder!");
-    return false;
-  }
-
-  wheel_radius = (static_cast<urdf::Cylinder*>(wheel_link->collision->geometry.get()))->radius;
-  return true;
-}
 
 namespace ackermann_controller{
 
@@ -73,17 +16,15 @@ namespace ackermann_controller{
     : open_loop_(false)
     , command_struct_()
     , command_struct_ackermann_()
-    , wheel_separation_(0.0)
-    , wheel_radius_(0.0)
+    , track_(0.0)
+    , front_wheel_radius_(0.0)
+    , rear_wheel_radius_(0.0)
+    , steering_limit_(0.0)
     , wheel_base_(0.0)
-    , wheel_separation_multiplier_(1.0)
-    , wheel_radius_multiplier_(1.0)
     , cmd_vel_timeout_(0.5)
     , base_frame_id_("base_link")
     , enable_odom_tf_(true)
     , enable_twist_cmd_(false)
-    , wheel_joints_size_(0)
-    , steering_joints_size_(0)
   {
   }
 
@@ -147,49 +88,48 @@ namespace ackermann_controller{
     name_ = complete_ns.substr(id + 1);
 
     // Get joint names from the parameter server
-    std::vector<std::string> left_wheel_names, right_wheel_names;
-    if (!getWheelNames(controller_nh, "left_wheel", left_wheel_names) or
-        !getWheelNames(controller_nh, "right_wheel", right_wheel_names))
+    std::vector<std::string> front_wheel_names, rear_wheel_names;
+    if (!getWheelNames(controller_nh, "front_wheel", front_wheel_names) or
+        !getWheelNames(controller_nh, "rear_wheel", rear_wheel_names))
     {
       return false;
     }
 
-    if (left_wheel_names.size() != right_wheel_names.size())
+    if (front_wheel_names.size() != rear_wheel_names.size())
     {
       ROS_ERROR_STREAM_NAMED(name_,
-          "#left wheels (" << left_wheel_names.size() << ") != " <<
-          "#right wheels (" << right_wheel_names.size() << ").");
+          "#front wheels (" << front_wheel_names.size() << ") != " <<
+          "#rear wheels (" << rear_wheel_names.size() << ").");
+      return false;
+    }
+    else if (front_wheel_names.size() != 2)
+    {
+      ROS_ERROR_STREAM_NAMED(name_,
+          "#two wheels by axle (left and right) is needed; now : "<<front_wheel_names.size()<<" .");
       return false;
     }
     else
     {
-      wheel_joints_size_ = left_wheel_names.size();
-
-      left_wheel_joints_.resize(wheel_joints_size_);
-      right_wheel_joints_.resize(wheel_joints_size_);
+      front_wheel_joints_.resize(front_wheel_names.size());
+      rear_wheel_joints_.resize(front_wheel_names.size());
     }
 
     // Get steering joint names from the parameter server
-    std::vector<std::string> left_steering_names, right_steering_names;
-    if (!getWheelNames(controller_nh, "left_steering", left_steering_names) or
-        !getWheelNames(controller_nh, "right_steering", right_steering_names))
+    std::vector<std::string> front_steering_names;
+    if (!getWheelNames(controller_nh, "front_steering", front_steering_names))
     {
       return false;
     }
 
-    if (left_steering_names.size() != right_steering_names.size())
+    if (front_steering_names.size() != 2)
     {
       ROS_ERROR_STREAM_NAMED(name_,
-          "#left steerings (" << left_steering_names.size() << ") != " <<
-          "#right steerings (" << right_steering_names.size() << ").");
+          "#two steering by axle (left and right) is needed; now : "<<front_steering_names.size()<<" .");
       return false;
     }
     else
     {
-      steering_joints_size_ = left_steering_names.size();
-
-      left_steering_joints_.resize(steering_joints_size_);
-      right_steering_joints_.resize(steering_joints_size_);
+      front_steering_joints_.resize(front_steering_names.size());
     }
 
     // Odometry related:
@@ -200,14 +140,6 @@ namespace ackermann_controller{
     publish_period_ = ros::Duration(1.0 / publish_rate);
 
     controller_nh.param("open_loop", open_loop_, open_loop_);
-
-    controller_nh.param("wheel_separation_multiplier", wheel_separation_multiplier_, wheel_separation_multiplier_);
-    ROS_INFO_STREAM_NAMED(name_, "Wheel separation will be multiplied by "
-                          << wheel_separation_multiplier_ << ".");
-
-    controller_nh.param("wheel_radius_multiplier", wheel_radius_multiplier_, wheel_radius_multiplier_);
-    ROS_INFO_STREAM_NAMED(name_, "Wheel radius will be multiplied by "
-                          << wheel_radius_multiplier_ << ".");
 
     int velocity_rolling_window_size = 10;
     controller_nh.param("velocity_rolling_window_size", velocity_rolling_window_size, velocity_rolling_window_size);
@@ -233,69 +165,90 @@ namespace ackermann_controller{
     // Velocity and acceleration limits:
     controller_nh.param("linear/x/has_velocity_limits"    , limiter_lin_.has_velocity_limits    , limiter_lin_.has_velocity_limits    );
     controller_nh.param("linear/x/has_acceleration_limits", limiter_lin_.has_acceleration_limits, limiter_lin_.has_acceleration_limits);
-    controller_nh.param("linear/x/has_jerk_limits"        , limiter_lin_.has_jerk_limits        , limiter_lin_.has_jerk_limits        );
     controller_nh.param("linear/x/max_velocity"           , limiter_lin_.max_velocity           ,  limiter_lin_.max_velocity          );
     controller_nh.param("linear/x/min_velocity"           , limiter_lin_.min_velocity           , -limiter_lin_.max_velocity          );
     controller_nh.param("linear/x/max_acceleration"       , limiter_lin_.max_acceleration       ,  limiter_lin_.max_acceleration      );
     controller_nh.param("linear/x/min_acceleration"       , limiter_lin_.min_acceleration       , -limiter_lin_.max_acceleration      );
-    controller_nh.param("linear/x/max_jerk"               , limiter_lin_.max_jerk               ,  limiter_lin_.max_jerk              );
-    controller_nh.param("linear/x/min_jerk"               , limiter_lin_.min_jerk               , -limiter_lin_.max_jerk              );
 
     controller_nh.param("angular/z/has_velocity_limits"    , limiter_ang_.has_velocity_limits    , limiter_ang_.has_velocity_limits    );
     controller_nh.param("angular/z/has_acceleration_limits", limiter_ang_.has_acceleration_limits, limiter_ang_.has_acceleration_limits);
-    controller_nh.param("angular/z/has_jerk_limits"        , limiter_ang_.has_jerk_limits        , limiter_ang_.has_jerk_limits        );
     controller_nh.param("angular/z/max_velocity"           , limiter_ang_.max_velocity           ,  limiter_ang_.max_velocity          );
     controller_nh.param("angular/z/min_velocity"           , limiter_ang_.min_velocity           , -limiter_ang_.max_velocity          );
     controller_nh.param("angular/z/max_acceleration"       , limiter_ang_.max_acceleration       ,  limiter_ang_.max_acceleration      );
     controller_nh.param("angular/z/min_acceleration"       , limiter_ang_.min_acceleration       , -limiter_ang_.max_acceleration      );
-    controller_nh.param("angular/z/max_jerk"               , limiter_ang_.max_jerk               ,  limiter_ang_.max_jerk              );
-    controller_nh.param("angular/z/min_jerk"               , limiter_ang_.min_jerk               , -limiter_ang_.max_jerk              );
 
     // If either parameter is not available, we need to look up the value in the URDF
-    bool lookup_wheel_separation = !controller_nh.getParam("wheel_separation", wheel_separation_);
-    bool lookup_wheel_radius = !controller_nh.getParam("wheel_radius", wheel_radius_);
+    bool lookup_track = !controller_nh.getParam("track", track_);
+    bool lookup_front_wheel_radius = !controller_nh.getParam("front_wheel_radius", front_wheel_radius_);
+    bool lookup_rear_wheel_radius = !controller_nh.getParam("rear_wheel_radius", rear_wheel_radius_);
     bool lookup_wheel_base = !controller_nh.getParam("wheel_base", wheel_base_);
 
-    if (!setOdomParamsFromUrdf(root_nh,
-                              left_wheel_names[0],
-                              right_wheel_names[0],
-                              lookup_wheel_separation,
-                              lookup_wheel_radius))
+    urdf_vehicle_kinematic::UrdfVehicleKinematic uvk(root_nh, base_frame_id_);
+    if(lookup_track)
     {
+      if(!uvk.getDistanceBetweenJoints(front_wheel_names[0], front_wheel_names[1], track_))
+        return false;
+      else
+        controller_nh.setParam("track",track_);
+    }
+    if(lookup_front_wheel_radius)
+    {
+      if(!uvk.getJointRadius(front_wheel_names[0], front_wheel_radius_))
+        return false;
+      else
+        controller_nh.setParam("front_wheel_radius",front_wheel_radius_);
+    }
+    if(lookup_rear_wheel_radius)
+    {
+      if(!uvk.getJointRadius(rear_wheel_names[0], rear_wheel_radius_))
+        return false;
+      else
+        controller_nh.setParam("rear_wheel_radius",rear_wheel_radius_);
+    }
+    if(lookup_wheel_base)
+    {
+      if(!uvk.getDistanceBetweenJoints(front_wheel_names[0], rear_wheel_names[0], wheel_base_))
+        return false;
+      else
+        controller_nh.setParam("wheel_base",wheel_base_);
+    }
+
+    if(!uvk.getJointSteeringLimits(front_steering_names[0], steering_limit_))
       return false;
+    else
+    {
+      controller_nh.setParam("steering_limit",steering_limit_);
     }
 
     // Regardless of how we got the separation and radius, use them
     // to set the odometry parameters
-    const double ws = wheel_separation_multiplier_ * wheel_separation_;
-    const double wr = wheel_radius_multiplier_     * wheel_radius_;
+    const double ws = track_;
     const double wb = wheel_base_;
-    odometry_.setWheelParams(ws, wr, wb);
+    odometry_.setWheelParams(ws, front_wheel_radius_, rear_wheel_radius_, wb);
     ROS_INFO_STREAM_NAMED(name_,
                           "Odometry params : wheel separation " << ws
-                          << ", wheel radius " << wr
+                          << ", front wheel radius " << front_wheel_radius_
+                          << ", rear wheel radius " << rear_wheel_radius_
                           << ", wheel base " << wb);
 
     setOdomPubFields(root_nh, controller_nh);
 
     // Get the joint object to use in the realtime loop
-    for (int i = 0; i < wheel_joints_size_; ++i)
+    for (int i = 0; i < front_wheel_joints_.size(); ++i)
     {
       ROS_INFO_STREAM_NAMED(name_,
-                            "Adding left wheel with joint name: " << left_wheel_names[i]
-                            << " and right wheel with joint name: " << right_wheel_names[i]);
-      left_wheel_joints_[i] = hw_vel->getHandle(left_wheel_names[i]);  // throws on failure
-      right_wheel_joints_[i] = hw_vel->getHandle(right_wheel_names[i]);  // throws on failure
+                            "Adding front wheel with joint name: " << front_wheel_names[i]
+                            << " and rear wheel with joint name: " << rear_wheel_names[i]);
+      front_wheel_joints_[i] = hw_vel->getHandle(front_wheel_names[i]);  // throws on failure
+      rear_wheel_joints_[i] = hw_vel->getHandle(rear_wheel_names[i]);  // throws on failure
     }
 
     // Get the steering joint object to use in the realtime loop
-    for (int i = 0; i < steering_joints_size_; ++i)
+    for (int i = 0; i < front_steering_joints_.size(); ++i)
     {
       ROS_INFO_STREAM_NAMED(name_,
-                            "Adding left steering with joint name: " << left_steering_names[i]
-                            << " and right steering with joint name: " << right_steering_names[i]);
-      left_steering_joints_[i] = hw_pos->getHandle(left_steering_names[i]);  // throws on failure
-      right_steering_joints_[i] = hw_pos->getHandle(right_steering_names[i]);  // throws on failure
+                            "Adding front steering with joint name: " << front_steering_names[i]);
+      front_steering_joints_[i] = hw_pos->getHandle(front_steering_names[i]);  // throws on failure
     }
 
     if(enable_twist_cmd_ == true)
@@ -315,46 +268,41 @@ namespace ackermann_controller{
     }
     else
     {
-      double left_pos  = 0.0;
-      double right_pos = 0.0;
-      double left_vel  = 0.0;
-      double right_vel = 0.0;
-      for (size_t i = 0; i < wheel_joints_size_; ++i)
+      double front_pos  = 0.0;
+      double rear_pos = 0.0;
+      double front_vel  = 0.0;
+      double rear_vel = 0.0;
+      for (size_t i = 0; i < front_wheel_joints_.size(); ++i)
       {
-        const double lp = left_wheel_joints_[i].getPosition();
-        const double rp = right_wheel_joints_[i].getPosition();
-        if (std::isnan(lp) || std::isnan(rp))
+        const double fp = front_wheel_joints_[i].getPosition();
+        const double rp = rear_wheel_joints_[i].getPosition();
+        if (std::isnan(fp) || std::isnan(rp))
           return;
-        left_pos  += lp;
-        right_pos += rp;
+        front_pos  += fp;
+        rear_pos += rp;
 
-        const double ls = left_wheel_joints_[i].getVelocity();
-        const double rs = right_wheel_joints_[i].getVelocity();
+        const double ls = front_wheel_joints_[i].getVelocity();
+        const double rs = rear_wheel_joints_[i].getVelocity();
         if (std::isnan(ls) || std::isnan(rs))
           return;
-        left_vel  += ls;
-        right_vel += rs;
+        front_vel  += ls;
+        rear_vel += rs;
       }
-      left_pos  /= wheel_joints_size_;
-      right_pos /= wheel_joints_size_;
-      left_vel  /= wheel_joints_size_;
-      right_vel /= wheel_joints_size_;
-      double wheel_angular_pos = (left_pos + right_pos)/2.0;
-      double wheel_angular_vel = (left_vel + right_vel)/2.0;
+      front_pos  /= front_wheel_joints_.size();
+      rear_pos /= front_wheel_joints_.size();
+      front_vel  /= front_wheel_joints_.size();
+      rear_vel /= front_wheel_joints_.size();
 
-      double left_steering_pos = 0.0;
-      double right_steering_pos = 0.0;
-      if(left_steering_joints_.size() > 0 && right_steering_joints_.size() > 0)
+      double front_left_steering_pos = 0.0, front_right_steering_pos = 0.0;
+      if (front_steering_joints_.size() == 2)
       {
-    	  left_steering_pos = left_steering_joints_[0].getPosition();
-    	  right_steering_pos = right_steering_joints_[0].getPosition();
-        ROS_DEBUG_STREAM(" left_steering_pos "<<left_steering_pos<<" right_steering_pos "<<right_steering_pos);
+        front_left_steering_pos = front_steering_joints_[0].getPosition();
+        front_right_steering_pos = front_steering_joints_[1].getPosition();
       }
-      double steering_pos = (left_steering_pos + right_steering_pos)/2.0;
+      double front_steering_pos = atan2(2, 1/tan(front_left_steering_pos) + 1/tan(front_right_steering_pos));
 
-      ROS_DEBUG_STREAM("wheel_angular_vel "<<wheel_angular_vel<<" steering_pos "<<steering_pos);
       // Estimate linear and angular velocity using joint information
-      odometry_.update(wheel_angular_pos, wheel_angular_vel, steering_pos, time);
+      odometry_.update(front_pos, front_vel, rear_pos, rear_vel, front_steering_pos, time);
     }
 
     // Publish odometry message
@@ -418,41 +366,67 @@ namespace ackermann_controller{
 
 
     const double angular_speed = odometry_.getAngular();
-    // Apply multipliers:
-    const double ws = wheel_separation_multiplier_ * wheel_separation_;
-    const double wr = wheel_radius_multiplier_     * wheel_radius_;
 
-    ROS_DEBUG_STREAM("angular_speed "<<angular_speed<<" curr_cmd.lin "<<curr_cmd.lin<< " wr "<<wr);
+    ROS_DEBUG_STREAM("angular_speed "<<angular_speed<<" curr_cmd.lin "<<curr_cmd.lin);
     // Compute wheels velocities:
-    const double vel_left_front  = copysign(1.0, curr_cmd.lin) * sqrt((pow((curr_cmd.lin - angular_speed*ws/2),2)+pow(wheel_base_*angular_speed,2)))/wr;
-    const double vel_right_front = copysign(1.0, curr_cmd.lin) * sqrt((pow((curr_cmd.lin + angular_speed*ws/2),2)+pow(wheel_base_*angular_speed,2)))/wr;
-    const double vel_left_rear = (curr_cmd.lin - angular_speed*ws/2)/wr;
-    const double vel_right_rear = (curr_cmd.lin + angular_speed*ws/2)/wr;
+    // TODO should use angular cmd instead of angular odom and differenciate twist and ackermann cmd
+    const double vel_left_front  = copysign(1.0, curr_cmd.lin) *
+                                   sqrt((pow((curr_cmd.lin - angular_speed*track_/2),2)
+                                         +pow(wheel_base_*angular_speed,2)))/front_wheel_radius_;
+    const double vel_right_front = copysign(1.0, curr_cmd.lin) *
+                                   sqrt((pow((curr_cmd.lin + angular_speed*track_/2),2)+
+                                         pow(wheel_base_*angular_speed,2)))/front_wheel_radius_;
+    const double vel_left_rear = (curr_cmd.lin - angular_speed*track_/2)/rear_wheel_radius_;
+    const double vel_right_rear = (curr_cmd.lin + angular_speed*track_/2)/rear_wheel_radius_;
     // Set wheels velocities:
-    if(left_wheel_joints_.size() > 1 && right_wheel_joints_.size() > 1)
+    if(front_wheel_joints_.size() == 2 && rear_wheel_joints_.size() == 2)
     {
-      left_wheel_joints_[0].setCommand(vel_left_front);
-      right_wheel_joints_[0].setCommand(vel_right_front);
-      left_wheel_joints_[1].setCommand(vel_left_rear);
-      right_wheel_joints_[1].setCommand(vel_right_rear);
+      front_wheel_joints_[0].setCommand(vel_left_front);
+      rear_wheel_joints_[0].setCommand(vel_left_rear);
+      front_wheel_joints_[1].setCommand(vel_right_front);
+      rear_wheel_joints_[1].setCommand(vel_right_rear);
     }
 
-    double front_steering = 0;
+    double front_left_steering = 0, front_right_steering = 0;
     if(enable_twist_cmd_ == true)
     {
-      if(fabs(odometry_.getLinear()) > 0.01)
-        front_steering = atan(curr_cmd.ang*wheel_base_/odometry_.getLinear());
+      if(fabs(odometry_.getLinear()) > fabs(curr_cmd.ang*track_/2.0))
+      {
+        front_left_steering = atan(curr_cmd.ang*wheel_base_ /
+                                    (odometry_.getLinear() - curr_cmd.ang*track_/2.0));
+        front_right_steering = atan(curr_cmd.ang*wheel_base_ /
+                                     (odometry_.getLinear() + curr_cmd.ang*track_/2.0));
+      }
+      else
+      {
+        if(fabs(curr_cmd.ang) > std::numeric_limits<double>::epsilon())
+        {
+          // TODO CIR is not converging, do not put left and right to the same limit
+          front_left_steering = copysign(steering_limit_, curr_cmd.ang*odometry_.getLinear());
+          front_right_steering = copysign(steering_limit_, curr_cmd.ang*odometry_.getLinear());
+        }
+        else
+        {
+          front_left_steering = 0.0;
+          front_right_steering = 0.0;
+        }
+      }
     }
     else
     {
-      front_steering = curr_cmd.steering;
+      front_left_steering = atan2(tan(curr_cmd.steering),
+                                  1 - tan(curr_cmd.steering)*track_/(2*wheel_base_));
+      front_right_steering = atan2(tan(curr_cmd.steering),
+                                   1 + tan(curr_cmd.steering)*track_/(2*wheel_base_));
     }
 
-    if(left_steering_joints_.size() > 0 && right_steering_joints_.size() > 0)
+    /// TODO check limits to not apply the same steering on right and left when saturated !
+
+    if(front_steering_joints_.size() == 2)
     {
-      ROS_DEBUG_STREAM("front_steering "<<front_steering);
-      left_steering_joints_[0].setCommand(front_steering);
-      right_steering_joints_[0].setCommand(front_steering);
+      ROS_DEBUG_STREAM("front_left_steering "<<front_left_steering<<"front_right_steering "<<front_right_steering);
+      front_steering_joints_[0].setCommand(front_left_steering);
+      front_steering_joints_[1].setCommand(front_right_steering);
     }
   }
 
@@ -474,17 +448,16 @@ namespace ackermann_controller{
   void AckermannController::brake()
   {
     const double vel = 0.0;
-    for (size_t i = 0; i < wheel_joints_size_; ++i)
+    for (size_t i = 0; i < front_wheel_joints_.size(); ++i)
     {
-      left_wheel_joints_[i].setCommand(vel);
-      right_wheel_joints_[i].setCommand(vel);
+      front_wheel_joints_[i].setCommand(vel);
+      rear_wheel_joints_[i].setCommand(vel);
     }
 
     const double pos = 0.0;
-    for (size_t i = 0; i < steering_joints_size_; ++i)
+    for (size_t i = 0; i < front_steering_joints_.size(); ++i)
     {
-      left_steering_joints_[i].setCommand(pos);
-      right_steering_joints_[i].setCommand(pos);
+      front_steering_joints_[i].setCommand(pos);
     }
   }
 
@@ -579,75 +552,6 @@ namespace ackermann_controller{
       }
 
       return true;
-  }
-
-  bool AckermannController::setOdomParamsFromUrdf(ros::NodeHandle& root_nh,
-                             const std::string& left_wheel_name,
-                             const std::string& right_wheel_name,
-                             bool lookup_wheel_separation,
-                             bool lookup_wheel_radius)
-  {
-    if (!(lookup_wheel_separation || lookup_wheel_radius))
-    {
-      // Short-circuit in case we don't need to look up anything, so we don't have to parse the URDF
-      return true;
-    }
-
-    // Parse robot description
-    const std::string model_param_name = "robot_description";
-    bool res = root_nh.hasParam(model_param_name);
-    std::string robot_model_str="";
-    if (!res || !root_nh.getParam(model_param_name,robot_model_str))
-    {
-      ROS_ERROR_NAMED(name_, "Robot descripion couldn't be retrieved from param server.");
-      return false;
-    }
-
-    boost::shared_ptr<urdf::ModelInterface> model(urdf::parseURDF(robot_model_str));
-
-    boost::shared_ptr<const urdf::Joint> left_wheel_joint(model->getJoint(left_wheel_name));
-    boost::shared_ptr<const urdf::Joint> right_wheel_joint(model->getJoint(right_wheel_name));
-
-    if (lookup_wheel_separation)
-    {
-      // Get wheel separation
-      if (!left_wheel_joint)
-      {
-        ROS_ERROR_STREAM_NAMED(name_, left_wheel_name
-                               << " couldn't be retrieved from model description");
-        return false;
-      }
-
-      if (!right_wheel_joint)
-      {
-        ROS_ERROR_STREAM_NAMED(name_, right_wheel_name
-                               << " couldn't be retrieved from model description");
-        return false;
-      }
-
-      ROS_INFO_STREAM("left wheel to origin: " << left_wheel_joint->parent_to_joint_origin_transform.position.x << ","
-                      << left_wheel_joint->parent_to_joint_origin_transform.position.y << ", "
-                      << left_wheel_joint->parent_to_joint_origin_transform.position.z);
-      ROS_INFO_STREAM("right wheel to origin: " << right_wheel_joint->parent_to_joint_origin_transform.position.x << ","
-                      << right_wheel_joint->parent_to_joint_origin_transform.position.y << ", "
-                      << right_wheel_joint->parent_to_joint_origin_transform.position.z);
-
-      wheel_separation_ = euclideanOfVectors(left_wheel_joint->parent_to_joint_origin_transform.position,
-                                             right_wheel_joint->parent_to_joint_origin_transform.position);
-
-    }
-
-    if (lookup_wheel_radius)
-    {
-      // Get wheel radius
-      if (!getWheelRadius(model->getLink(left_wheel_joint->child_link_name), wheel_radius_))
-      {
-        ROS_ERROR_STREAM_NAMED(name_, "Couldn't retrieve " << left_wheel_name << " wheel radius");
-        return false;
-      }
-    }
-
-    return true;
   }
 
   void AckermannController::setOdomPubFields(ros::NodeHandle& root_nh, ros::NodeHandle& controller_nh)
