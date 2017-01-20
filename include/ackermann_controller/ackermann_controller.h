@@ -79,10 +79,9 @@ namespace ackermann_controller{
     bool open_loop_;
 
     /// Hardware handles:
-    std::vector<hardware_interface::JointHandle> left_wheel_joints_;
-    std::vector<hardware_interface::JointHandle> right_wheel_joints_;
-    std::vector<hardware_interface::JointHandle> left_steering_joints_;
-    std::vector<hardware_interface::JointHandle> right_steering_joints_;
+    std::vector<hardware_interface::JointHandle> front_wheel_joints_;
+    std::vector<hardware_interface::JointHandle> rear_wheel_joints_;
+    std::vector<hardware_interface::JointHandle> front_steering_joints_;
 
     /// Velocity command related:
     struct Commands
@@ -108,18 +107,18 @@ namespace ackermann_controller{
     boost::shared_ptr<realtime_tools::RealtimePublisher<tf::tfMessage> > tf_odom_pub_;
     Odometry odometry_;
 
-    /// Wheel separation, wrt the midpoint of the wheel width:
-    double wheel_separation_;
+
+    /// Wheel separation (or track), distance between left and right wheels (from the midpoint of the wheel width):
+    double track_;
 
     /// Wheel radius (assuming it's the same for the left and right wheels):
-    double wheel_radius_;
+    double front_wheel_radius_, rear_wheel_radius_;
 
-    /// Wheel base (distance between front and rear wheel:
+    /// Joint steering limits (assuming the limit is the same for the left and right joint)
+    double steering_limit_;
+
+    /// Wheel base (distance between front and rear wheel):
     double wheel_base_;
-
-    /// Wheel separation and radius calibration multipliers:
-    double wheel_separation_multiplier_;
-    double wheel_radius_multiplier_;
 
     /// Timeout to consider cmd_vel commands old:
     double cmd_vel_timeout_;
@@ -132,12 +131,6 @@ namespace ackermann_controller{
 
     /// Whether the control is make with ackermann msg or twist msg:
     bool enable_twist_cmd_;
-
-    /// Number of wheel joints:
-    size_t wheel_joints_size_;
-    /// Number of steering joints:
-    size_t steering_joints_size_;
-
 
     /// Speed limiters:
     Commands last1_cmd_;
@@ -174,18 +167,6 @@ namespace ackermann_controller{
     bool getWheelNames(ros::NodeHandle& controller_nh,
                        const std::string& wheel_param,
                        std::vector<std::string>& wheel_names);
-
-    /**
-     * \brief Sets odometry parameters from the URDF, i.e. the wheel radius and separation
-     * \param root_nh Root node handle
-     * \param left_wheel_name Name of the left wheel joint
-     * \param right_wheel_name Name of the right wheel joint
-     */
-    bool setOdomParamsFromUrdf(ros::NodeHandle& root_nh,
-                               const std::string& left_wheel_name,
-                               const std::string& right_wheel_name,
-                               bool lookup_wheel_separation,
-                               bool lookup_wheel_radius);
 
     /**
      * \brief Sets the odometry publishing fields
