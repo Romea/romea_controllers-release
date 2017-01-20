@@ -38,15 +38,18 @@ namespace ackermann_controller
     void init(const ros::Time &time);
 
     /**
-     * \brief Updates the odometry class with latest wheels position
-     * \param left_pos  Left  wheel position [rad]
-     * \param right_pos Right wheel position [rad]
-     * \param time      Current time
+     * \brief Updates the odometry class with latest wheels and steering position
+     * \param front_wheel_angular_pos  Front  wheel position [rad]
+     * \param front_wheel_angular_vel  Front  wheel angular speed [rad/s]
+     * \param rear_wheel_angular_pos Rear wheel position [rad]
+     * \param rear_wheel_angular_vel Rear wheel angular speed [rad/s]
+     * \param front_steering position [rad]
+     * \param time ROS time
      * \return true if the odometry is actually updated
      */
-    bool update(double left_pos, double right_pos, const ros::Time &time);
-
-    bool update(double linear_pos, double linear_speed, double front_steering, const ros::Time &time);
+    bool update(double front_wheel_angular_pos, double front_wheel_angular_vel,
+                double rear_wheel_angular_pos, double rear_wheel_angular_vel,
+                double front_steering, const ros::Time &time);
 
     /**
      * \brief Updates the odometry class with latest velocity command
@@ -103,11 +106,12 @@ namespace ackermann_controller
 
     /**
      * \brief Sets the wheel parameters: radius and separation
-     * \param wheel_separation Seperation between left and right wheels [m]
-     * \param wheel_radius     Wheel radius [m]
+     * \param track Seperation between left and right wheels [m]
+     * \param front_wheel_radius     Wheel radius [m]
+     * \param rear_wheel_radius     Wheel radius [m]
      * \param wheel_base       Wheel base [m]
      */
-    void setWheelParams(double wheel_separation, double wheel_radius, double wheel_base);
+    void setWheelParams(double track, double front_wheel_radius, double rear_wheel_radius, double wheel_base);
 
     /**
      * \brief Velocity rolling window size setter
@@ -141,7 +145,7 @@ namespace ackermann_controller
     void resetAccumulators();
 
     /// Current timestamp:
-    ros::Time timestamp_;
+    ros::Time timestamp_, last_update_timestamp_;
 
     /// Current pose:
     double x_;        //   [m]
@@ -153,8 +157,8 @@ namespace ackermann_controller
     double angular_; // [rad/s]
 
     /// Wheel kinematic parameters [m]:
-    double wheel_separation_;
-    double wheel_radius_;
+    double track_;
+    double front_wheel_radius_, rear_wheel_radius_;
     double wheel_base_;
 
     /// Previou wheel position/state [rad]:
@@ -166,9 +170,6 @@ namespace ackermann_controller
     size_t velocity_rolling_window_size_;
     RollingMeanAcc linear_acc_;
     RollingMeanAcc angular_acc_;
-
-    /// Integration funcion, used to integrate the odometry:
-    IntegrationFunction integrate_fun_;
   };
 }
 
