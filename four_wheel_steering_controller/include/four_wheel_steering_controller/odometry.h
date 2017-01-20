@@ -8,7 +8,7 @@
 #include <boost/accumulators/statistics/rolling_mean.hpp>
 #include <boost/function.hpp>
 
-namespace ackermann_controller
+namespace four_wheel_steering_controller
 {
   namespace bacc = boost::accumulators;
 
@@ -38,18 +38,18 @@ namespace ackermann_controller
     void init(const ros::Time &time);
 
     /**
-     * \brief Updates the odometry class with latest wheels and steering position
-     * \param front_wheel_angular_pos  Front  wheel position [rad]
-     * \param front_wheel_angular_vel  Front  wheel angular speed [rad/s]
-     * \param rear_wheel_angular_pos Rear wheel position [rad]
-     * \param rear_wheel_angular_vel Rear wheel angular speed [rad/s]
-     * \param front_steering position [rad]
-     * \param time ROS time
+     * \brief Updates the odometry class with latest wheels and steerings position
+     * \param fl_speed front left wheel vehicle speed [rad/s]
+     * \param fr_speed front right wheel vehicle speed [rad/s]
+     * \param rl_speed rear left wheel vehicle speed [rad/s]
+     * \param rr_speed rear right wheel vehicle speed [rad/s]
+     * \param front_steering  steering position [rad]
+     * \param rear_steering  steering position [rad]
+     * \param time      Current time
      * \return true if the odometry is actually updated
      */
-    bool update(double front_wheel_angular_pos, double front_wheel_angular_vel,
-                double rear_wheel_angular_pos, double rear_wheel_angular_vel,
-                double front_steering, const ros::Time &time);
+    bool update(const double& fl_speed, const double& fr_speed, const double& rl_speed, const double& rr_speed,
+                double front_steering, double rear_steering, const ros::Time &time);
 
     /**
      * \brief Updates the odometry class with latest velocity command
@@ -86,13 +86,32 @@ namespace ackermann_controller
       return y_;
     }
 
+
     /**
-     * \brief linear velocity getter
+     * \brief linear velocity getter norm
      * \return linear velocity [m/s]
      */
     double getLinear() const
     {
       return linear_;
+    }
+
+    /**
+     * \brief linear velocity getter along X on the robot base link frame
+     * \return linear velocity [m/s]
+     */
+    double getLinearX() const
+    {
+      return linear_x_;
+    }
+
+    /**
+     * \brief linear velocity getter along Y on the robot base link frame
+     * \return linear velocity [m/s]
+     */
+    double getLinearY() const
+    {
+      return linear_y_;
     }
 
     /**
@@ -107,11 +126,10 @@ namespace ackermann_controller
     /**
      * \brief Sets the wheel parameters: radius and separation
      * \param track Seperation between left and right wheels [m]
-     * \param front_wheel_radius     Wheel radius [m]
-     * \param rear_wheel_radius     Wheel radius [m]
+     * \param wheel_radius     Wheel radius [m]
      * \param wheel_base       Wheel base [m]
      */
-    void setWheelParams(double track, double front_wheel_radius, double rear_wheel_radius, double wheel_base);
+    void setWheelParams(double track, double wheel_radius, double wheel_base);
 
     /**
      * \brief Velocity rolling window size setter
@@ -124,6 +142,14 @@ namespace ackermann_controller
     /// Rolling mean accumulator and window:
     typedef bacc::accumulator_set<double, bacc::stats<bacc::tag::rolling_mean> > RollingMeanAcc;
     typedef bacc::tag::rolling_window RollingWindow;
+
+    /**
+     * \brief Integrates the velocities (linear on x and y and angular)
+     * \param linear_x  Linear  velocity along x of the robot frame  [m] (linear  displacement, i.e. m/s * dt) computed by encoders
+     * \param linear_y  Linear  velocity along y of the robot frame   [m] (linear  displacement, i.e. m/s * dt) computed by encoders
+     * \param angular Angular velocity [rad] (angular displacement, i.e. m/s * dt) computed by encoders
+     */
+    void integrateXY(double linear_x, double linear_y, double angular);
 
     /**
      * \brief Integrates the velocities (linear and angular) using 2nd order Runge-Kutta
@@ -153,17 +179,15 @@ namespace ackermann_controller
     double heading_;  // [rad]
 
     /// Current velocity:
-    double linear_;  //   [m/s]
+    double linear_, linear_x_, linear_y_;  //   [m/s]
     double angular_; // [rad/s]
 
     /// Wheel kinematic parameters [m]:
     double track_;
-    double front_wheel_radius_, rear_wheel_radius_;
+    double wheel_radius_;
     double wheel_base_;
 
-    /// Previou wheel position/state [rad]:
-    double left_wheel_old_pos_;
-    double right_wheel_old_pos_;
+    /// Previous wheel position/state [rad]:
     double wheel_old_pos_;
 
     /// Rolling mean accumulators for the linar and angular velocities:

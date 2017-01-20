@@ -2,24 +2,19 @@
 
 #include <tf/transform_datatypes.h>
 
-#include <urdf_parser/urdf_parser.h>
-
 #include <boost/assign.hpp>
 
+#include <four_wheel_steering_controller/four_wheel_steering_controller.h>
 #include <urdf_vehicle_kinematic/urdf_vehicle_kinematic.h>
 
-#include <ackermann_controller/ackermann_controller.h>
+namespace four_wheel_steering_controller{
 
-namespace ackermann_controller{
-
-  AckermannController::AckermannController()
+  FourWheelSteeringController::FourWheelSteeringController()
     : open_loop_(false)
     , command_struct_()
-    , command_struct_ackermann_()
+    , command_struct_four_wheel_steering_()
     , track_(0.0)
-    , front_wheel_radius_(0.0)
-    , rear_wheel_radius_(0.0)
-    , steering_limit_(0.0)
+    , wheel_radius_(0.0)
     , wheel_base_(0.0)
     , cmd_vel_timeout_(0.5)
     , base_frame_id_("base_link")
@@ -28,14 +23,14 @@ namespace ackermann_controller{
   {
   }
 
-  bool AckermannController::initRequest(hardware_interface::RobotHW *const robot_hw,
+  bool FourWheelSteeringController::initRequest(hardware_interface::RobotHW *const robot_hw,
                          ros::NodeHandle& root_nh,
                          ros::NodeHandle& ctrlr_nh,
                          std::set<std::string> &claimed_resources)
   {
     if (state_ != CONSTRUCTED)
     {
-      ROS_ERROR("The ackermann controller could not be created.");
+      ROS_ERROR("The four_wheel_steering controller could not be created.");
       return false;
     }
 
@@ -78,7 +73,7 @@ namespace ackermann_controller{
     return true;
   }
 
-  bool AckermannController::init(hardware_interface::PositionJointInterface* hw_pos,
+  bool FourWheelSteeringController::init(hardware_interface::PositionJointInterface* hw_pos,
                                  hardware_interface::VelocityJointInterface* hw_vel,
                                  ros::NodeHandle& root_nh,
                                  ros::NodeHandle &controller_nh)
@@ -89,7 +84,7 @@ namespace ackermann_controller{
 
     // Get joint names from the parameter server
     std::vector<std::string> front_wheel_names, rear_wheel_names;
-    if (!getWheelNames(controller_nh, "front_wheel", front_wheel_names) or
+    if (!getWheelNames(controller_nh, "front_wheel", front_wheel_names) ||
         !getWheelNames(controller_nh, "rear_wheel", rear_wheel_names))
     {
       return false;
@@ -115,13 +110,21 @@ namespace ackermann_controller{
     }
 
     // Get steering joint names from the parameter server
-    std::vector<std::string> front_steering_names;
-    if (!getWheelNames(controller_nh, "front_steering", front_steering_names))
+    std::vector<std::string> front_steering_names, rear_steering_names;
+    if (!getWheelNames(controller_nh, "front_steering", front_steering_names) ||
+        !getWheelNames(controller_nh, "rear_steering", rear_steering_names))
     {
       return false;
     }
 
-    if (front_steering_names.size() != 2)
+    if (front_steering_names.size() != rear_steering_names.size())
+    {
+      ROS_ERROR_STREAM_NAMED(name_,
+          "#left steerings (" << front_steering_names.size() << ") != " <<
+          "#right steerings (" << rear_steering_names.size() << ").");
+      return false;
+    }
+    else if (front_steering_names.size() != 2)
     {
       ROS_ERROR_STREAM_NAMED(name_,
           "#two steering by axle (left and right) is needed; now : "<<front_steering_names.size()<<" .");
@@ -130,6 +133,7 @@ namespace ackermann_controller{
     else
     {
       front_steering_joints_.resize(front_steering_names.size());
+      rear_steering_joints_.resize(front_steering_names.size());
     }
 
     // Odometry related:
@@ -160,7 +164,7 @@ namespace ackermann_controller{
     ROS_INFO_STREAM_NAMED(name_, "Publishing to tf is " << (enable_odom_tf_?"enabled":"disabled"));
 
     controller_nh.param("enable_twist_cmd", enable_twist_cmd_, enable_twist_cmd_);
-    ROS_INFO_STREAM_NAMED(name_, "Twist cmd is " << (enable_twist_cmd_?"enabled":"disabled")<<" (default is ackermann)");
+    ROS_INFO_STREAM_NAMED(name_, "Twist cmd is " << (enable_twist_cmd_?"enabled":"disabled")<<" (default is four_wheel_steering)");
 
     // Velocity and acceleration limits:
     controller_nh.param("linear/x/has_velocity_limits"    , limiter_lin_.has_velocity_limits    , limiter_lin_.has_velocity_limits    );
@@ -179,56 +183,35 @@ namespace ackermann_controller{
 
     // If either parameter is not available, we need to look up the value in the URDF
     bool lookup_track = !controller_nh.getParam("track", track_);
-    bool lookup_front_wheel_radius = !controller_nh.getParam("front_wheel_radius", front_wheel_radius_);
-    bool lookup_rear_wheel_radius = !controller_nh.getParam("rear_wheel_radius", rear_wheel_radius_);
+    bool lookup_wheel_radius = !controller_nh.getParam("wheel_radius", wheel_radius_);
     bool lookup_wheel_base = !controller_nh.getParam("wheel_base", wheel_base_);
 
     urdf_vehicle_kinematic::UrdfVehicleKinematic uvk(root_nh, base_frame_id_);
     if(lookup_track)
-    {
       if(!uvk.getDistanceBetweenJoints(front_wheel_names[0], front_wheel_names[1], track_))
         return false;
       else
         controller_nh.setParam("track",track_);
-    }
-    if(lookup_front_wheel_radius)
-    {
-      if(!uvk.getJointRadius(front_wheel_names[0], front_wheel_radius_))
+    if(lookup_wheel_radius)
+      if(!uvk.getJointRadius(front_wheel_names[0], wheel_radius_))
         return false;
       else
-        controller_nh.setParam("front_wheel_radius",front_wheel_radius_);
-    }
-    if(lookup_rear_wheel_radius)
-    {
-      if(!uvk.getJointRadius(rear_wheel_names[0], rear_wheel_radius_))
-        return false;
-      else
-        controller_nh.setParam("rear_wheel_radius",rear_wheel_radius_);
-    }
+        controller_nh.setParam("wheel_radius",wheel_radius_);
     if(lookup_wheel_base)
-    {
       if(!uvk.getDistanceBetweenJoints(front_wheel_names[0], rear_wheel_names[0], wheel_base_))
         return false;
       else
         controller_nh.setParam("wheel_base",wheel_base_);
-    }
-
-    if(!uvk.getJointSteeringLimits(front_steering_names[0], steering_limit_))
-      return false;
-    else
-    {
-      controller_nh.setParam("steering_limit",steering_limit_);
-    }
 
     // Regardless of how we got the separation and radius, use them
     // to set the odometry parameters
     const double ws = track_;
+    const double wr = wheel_radius_;
     const double wb = wheel_base_;
-    odometry_.setWheelParams(ws, front_wheel_radius_, rear_wheel_radius_, wb);
+    odometry_.setWheelParams(ws, wr, wb);
     ROS_INFO_STREAM_NAMED(name_,
                           "Odometry params : wheel separation " << ws
-                          << ", front wheel radius " << front_wheel_radius_
-                          << ", rear wheel radius " << rear_wheel_radius_
+                          << ", wheel radius " << wr
                           << ", wheel base " << wb);
 
     setOdomPubFields(root_nh, controller_nh);
@@ -237,8 +220,8 @@ namespace ackermann_controller{
     for (int i = 0; i < front_wheel_joints_.size(); ++i)
     {
       ROS_INFO_STREAM_NAMED(name_,
-                            "Adding front wheel with joint name: " << front_wheel_names[i]
-                            << " and rear wheel with joint name: " << rear_wheel_names[i]);
+                            "Adding left wheel with joint name: " << front_wheel_names[i]
+                            << " and right wheel with joint name: " << rear_wheel_names[i]);
       front_wheel_joints_[i] = hw_vel->getHandle(front_wheel_names[i]);  // throws on failure
       rear_wheel_joints_[i] = hw_vel->getHandle(rear_wheel_names[i]);  // throws on failure
     }
@@ -247,19 +230,21 @@ namespace ackermann_controller{
     for (int i = 0; i < front_steering_joints_.size(); ++i)
     {
       ROS_INFO_STREAM_NAMED(name_,
-                            "Adding front steering with joint name: " << front_steering_names[i]);
+                            "Adding left steering with joint name: " << front_steering_names[i]
+                            << " and right steering with joint name: " << rear_steering_names[i]);
       front_steering_joints_[i] = hw_pos->getHandle(front_steering_names[i]);  // throws on failure
+      rear_steering_joints_[i] = hw_pos->getHandle(rear_steering_names[i]);  // throws on failure
     }
 
     if(enable_twist_cmd_ == true)
-      sub_command_ = controller_nh.subscribe("cmd_vel", 1, &AckermannController::cmdVelCallback, this);
+      sub_command_ = controller_nh.subscribe("cmd_vel", 1, &FourWheelSteeringController::cmdVelCallback, this);
     else
-      sub_command_ackermann_ = controller_nh.subscribe("cmd_ackermann", 1, &AckermannController::cmdAckermannCallback, this);
+      sub_command_four_wheel_steering_ = controller_nh.subscribe("cmd_four_wheel_steering", 1, &FourWheelSteeringController::cmdFourWheelSteeringCallback, this);
 
     return true;
   }
 
-  void AckermannController::update(const ros::Time& time, const ros::Duration& period)
+  void FourWheelSteeringController::update(const ros::Time& time, const ros::Duration& period)
   {
     // COMPUTE AND PUBLISH ODOMETRY
     if (open_loop_)
@@ -268,41 +253,30 @@ namespace ackermann_controller{
     }
     else
     {
-      double front_pos  = 0.0;
-      double rear_pos = 0.0;
-      double front_vel  = 0.0;
-      double rear_vel = 0.0;
-      for (size_t i = 0; i < front_wheel_joints_.size(); ++i)
-      {
-        const double fp = front_wheel_joints_[i].getPosition();
-        const double rp = rear_wheel_joints_[i].getPosition();
-        if (std::isnan(fp) || std::isnan(rp))
-          return;
-        front_pos  += fp;
-        rear_pos += rp;
+      const double fl_speed = front_wheel_joints_[0].getVelocity();
+      const double fr_speed = front_wheel_joints_[1].getVelocity();
+      const double rl_speed = rear_wheel_joints_[0].getVelocity();
+      const double rr_speed = rear_wheel_joints_[1].getVelocity();
+      if (std::isnan(fl_speed) || std::isnan(fr_speed)
+          || std::isnan(rl_speed) || std::isnan(rr_speed))
+        return;
 
-        const double ls = front_wheel_joints_[i].getVelocity();
-        const double rs = rear_wheel_joints_[i].getVelocity();
-        if (std::isnan(ls) || std::isnan(rs))
-          return;
-        front_vel  += ls;
-        rear_vel += rs;
-      }
-      front_pos  /= front_wheel_joints_.size();
-      rear_pos /= front_wheel_joints_.size();
-      front_vel  /= front_wheel_joints_.size();
-      rear_vel /= front_wheel_joints_.size();
+      const double fl_steering = front_steering_joints_[0].getPosition();
+      const double fr_steering = front_steering_joints_[1].getPosition();
+      const double rl_steering = rear_steering_joints_[0].getPosition();
+      const double rr_steering = rear_steering_joints_[1].getPosition();
+      if (std::isnan(fl_steering) || std::isnan(fr_steering)
+          || std::isnan(rl_steering) || std::isnan(rr_steering))
+        return;
+      double front_steering_pos = atan2(2, 1/tan(fl_steering)
+                                          + 1/tan(fr_steering));
+      double rear_steering_pos = atan2(2, 1/tan(rl_steering)
+                                          + 1/tan(rr_steering));
 
-      double front_left_steering_pos = 0.0, front_right_steering_pos = 0.0;
-      if (front_steering_joints_.size() == 2)
-      {
-        front_left_steering_pos = front_steering_joints_[0].getPosition();
-        front_right_steering_pos = front_steering_joints_[1].getPosition();
-      }
-      double front_steering_pos = atan2(2, 1/tan(front_left_steering_pos) + 1/tan(front_right_steering_pos));
-
+      ROS_DEBUG_STREAM_THROTTLE(10, "rl_speed "<<rl_speed<<" front_steering_pos "<<front_steering_pos<<" rear_steering_pos "<<rear_steering_pos);
       // Estimate linear and angular velocity using joint information
-      odometry_.update(front_pos, front_vel, rear_pos, rear_vel, front_steering_pos, time);
+      odometry_.update(fl_speed, fr_speed, rl_speed, rr_speed,
+                       front_steering_pos, rear_steering_pos, time);
     }
 
     // Publish odometry message
@@ -320,7 +294,8 @@ namespace ackermann_controller{
         odom_pub_->msg_.pose.pose.position.x = odometry_.getX();
         odom_pub_->msg_.pose.pose.position.y = odometry_.getY();
         odom_pub_->msg_.pose.pose.orientation = orientation;
-        odom_pub_->msg_.twist.twist.linear.x  = odometry_.getLinear();
+        odom_pub_->msg_.twist.twist.linear.x  = odometry_.getLinearX();
+        odom_pub_->msg_.twist.twist.linear.y  = odometry_.getLinearY();
         odom_pub_->msg_.twist.twist.angular.z = odometry_.getAngular();
         odom_pub_->unlockAndPublish();
       }
@@ -341,7 +316,7 @@ namespace ackermann_controller{
     // Retreive current velocity command and time step:
     Commands curr_cmd;
     if(enable_twist_cmd_ == false)
-      curr_cmd = *(command_ackermann_.readFromRT());
+      curr_cmd = *(command_four_wheel_steering_.readFromRT());
     else
       curr_cmd = *(command_.readFromRT());
 
@@ -352,7 +327,8 @@ namespace ackermann_controller{
     {
       curr_cmd.lin = 0.0;
       curr_cmd.ang = 0.0;
-      curr_cmd.steering = 0.0;
+      curr_cmd.front_steering = 0.0;
+      curr_cmd.rear_steering = 0.0;
     }
 
     // Limit velocities and accelerations:
@@ -367,70 +343,76 @@ namespace ackermann_controller{
 
     const double angular_speed = odometry_.getAngular();
 
-    ROS_DEBUG_STREAM("angular_speed "<<angular_speed<<" curr_cmd.lin "<<curr_cmd.lin);
-    // Compute wheels velocities:
-    // TODO should use angular cmd instead of angular odom and differenciate twist and ackermann cmd
-    const double vel_left_front  = copysign(1.0, curr_cmd.lin) *
-                                   sqrt((pow((curr_cmd.lin - angular_speed*track_/2),2)
-                                         +pow(wheel_base_*angular_speed,2)))/front_wheel_radius_;
-    const double vel_right_front = copysign(1.0, curr_cmd.lin) *
-                                   sqrt((pow((curr_cmd.lin + angular_speed*track_/2),2)+
-                                         pow(wheel_base_*angular_speed,2)))/front_wheel_radius_;
-    const double vel_left_rear = (curr_cmd.lin - angular_speed*track_/2)/rear_wheel_radius_;
-    const double vel_right_rear = (curr_cmd.lin + angular_speed*track_/2)/rear_wheel_radius_;
+    ROS_DEBUG_STREAM("angular_speed "<<angular_speed<<" curr_cmd.lin "<<curr_cmd.lin<< " wheel_radius_ "<<wheel_radius_);
+    double vel_left_front = 0, vel_right_front = 0;
+    double vel_left_rear = 0, vel_right_rear = 0;
+    double front_left_steering = 0, front_right_steering = 0;
+    double rear_left_steering = 0, rear_right_steering = 0;
+    if(enable_twist_cmd_ == true)
+    {
+      // Compute wheels velocities:
+      if(fabs(curr_cmd.lin) > 0.001)
+      {
+        vel_left_front  = copysign(1.0, curr_cmd.lin) * sqrt((pow(curr_cmd.lin - curr_cmd.ang*track_/2,2)
+                                                                           +pow(wheel_base_*curr_cmd.ang/2.0,2)))/wheel_radius_;
+        vel_right_front = copysign(1.0, curr_cmd.lin) * sqrt((pow(curr_cmd.lin + curr_cmd.ang*track_/2,2)
+                                                                           +pow(wheel_base_*curr_cmd.ang/2.0,2)))/wheel_radius_;
+        vel_left_rear = copysign(1.0, curr_cmd.lin) * sqrt((pow(curr_cmd.lin - curr_cmd.ang*track_/2,2)
+                                                                         +pow(wheel_base_*curr_cmd.ang/2.0,2)))/wheel_radius_;
+        vel_right_rear = copysign(1.0, curr_cmd.lin) * sqrt((pow(curr_cmd.lin + curr_cmd.ang*track_/2,2)
+                                                                          +pow(wheel_base_*curr_cmd.ang/2.0,2)))/wheel_radius_;
+      }
+
+      if(fabs(2.0*curr_cmd.lin) > fabs(curr_cmd.ang*track_))
+      {
+        front_left_steering = atan(curr_cmd.ang*wheel_base_ /
+                                    (2.0*curr_cmd.lin - curr_cmd.ang*track_));
+        front_right_steering = atan(curr_cmd.ang*wheel_base_ /
+                                     (2.0*curr_cmd.lin + curr_cmd.ang*track_));
+        rear_left_steering = -atan(curr_cmd.ang*wheel_base_ /
+                                    (2.0*curr_cmd.lin - curr_cmd.ang*track_));
+        rear_right_steering = -atan(curr_cmd.ang*wheel_base_ /
+                                     (2.0*curr_cmd.lin + curr_cmd.ang*track_));
+      }
+      else if(fabs(curr_cmd.lin) > 0.001)
+      {
+        front_left_steering = copysign(M_PI_2, curr_cmd.ang);
+        front_right_steering = copysign(M_PI_2, curr_cmd.ang);
+        rear_left_steering = copysign(M_PI_2, -curr_cmd.ang);
+        rear_right_steering = copysign(M_PI_2, -curr_cmd.ang);
+      }
+
+    }
+    else
+    {
+      front_left_steering = curr_cmd.front_steering;
+      front_right_steering = curr_cmd.front_steering;
+      rear_left_steering = curr_cmd.rear_steering;
+      rear_right_steering = curr_cmd.rear_steering;
+    }
+
+    ROS_DEBUG_STREAM_THROTTLE(10, "vel_left_rear "<<vel_left_rear);
     // Set wheels velocities:
     if(front_wheel_joints_.size() == 2 && rear_wheel_joints_.size() == 2)
     {
       front_wheel_joints_[0].setCommand(vel_left_front);
-      rear_wheel_joints_[0].setCommand(vel_left_rear);
       front_wheel_joints_[1].setCommand(vel_right_front);
+      rear_wheel_joints_[0].setCommand(vel_left_rear);
       rear_wheel_joints_[1].setCommand(vel_right_rear);
     }
 
-    double front_left_steering = 0, front_right_steering = 0;
-    if(enable_twist_cmd_ == true)
-    {
-      if(fabs(odometry_.getLinear()) > fabs(curr_cmd.ang*track_/2.0))
-      {
-        front_left_steering = atan(curr_cmd.ang*wheel_base_ /
-                                    (odometry_.getLinear() - curr_cmd.ang*track_/2.0));
-        front_right_steering = atan(curr_cmd.ang*wheel_base_ /
-                                     (odometry_.getLinear() + curr_cmd.ang*track_/2.0));
-      }
-      else
-      {
-        if(fabs(curr_cmd.ang) > std::numeric_limits<double>::epsilon())
-        {
-          // TODO CIR is not converging, do not put left and right to the same limit
-          front_left_steering = copysign(steering_limit_, curr_cmd.ang*odometry_.getLinear());
-          front_right_steering = copysign(steering_limit_, curr_cmd.ang*odometry_.getLinear());
-        }
-        else
-        {
-          front_left_steering = 0.0;
-          front_right_steering = 0.0;
-        }
-      }
-    }
-    else
-    {
-      front_left_steering = atan2(tan(curr_cmd.steering),
-                                  1 - tan(curr_cmd.steering)*track_/(2*wheel_base_));
-      front_right_steering = atan2(tan(curr_cmd.steering),
-                                   1 + tan(curr_cmd.steering)*track_/(2*wheel_base_));
-    }
-
     /// TODO check limits to not apply the same steering on right and left when saturated !
-
-    if(front_steering_joints_.size() == 2)
+    if(front_steering_joints_.size() == 2 && rear_steering_joints_.size() == 2)
     {
-      ROS_DEBUG_STREAM("front_left_steering "<<front_left_steering<<"front_right_steering "<<front_right_steering);
+      ROS_DEBUG_STREAM("front_left_steering "<<front_left_steering<<" rear_right_steering "<<rear_right_steering);
       front_steering_joints_[0].setCommand(front_left_steering);
       front_steering_joints_[1].setCommand(front_right_steering);
+      rear_steering_joints_[0].setCommand(rear_left_steering);
+      rear_steering_joints_[1].setCommand(rear_right_steering);
     }
   }
 
-  void AckermannController::starting(const ros::Time& time)
+  void FourWheelSteeringController::starting(const ros::Time& time)
   {
     brake();
 
@@ -440,12 +422,12 @@ namespace ackermann_controller{
     odometry_.init(time);
   }
 
-  void AckermannController::stopping(const ros::Time& /*time*/)
+  void FourWheelSteeringController::stopping(const ros::Time& /*time*/)
   {
     brake();
   }
 
-  void AckermannController::brake()
+  void FourWheelSteeringController::brake()
   {
     const double vel = 0.0;
     for (size_t i = 0; i < front_wheel_joints_.size(); ++i)
@@ -458,10 +440,11 @@ namespace ackermann_controller{
     for (size_t i = 0; i < front_steering_joints_.size(); ++i)
     {
       front_steering_joints_[i].setCommand(pos);
+      rear_steering_joints_[i].setCommand(pos);
     }
   }
 
-  void AckermannController::cmdVelCallback(const geometry_msgs::Twist& command)
+  void FourWheelSteeringController::cmdVelCallback(const geometry_msgs::Twist& command)
   {
     if (isRunning())
     {
@@ -481,19 +464,21 @@ namespace ackermann_controller{
     }
   }
 
-  void AckermannController::cmdAckermannCallback(const ackermann_msgs::AckermannDrive& command)
+  void FourWheelSteeringController::cmdFourWheelSteeringCallback(const four_wheel_steering_msgs::FourWheelSteeringDrive& command)
   {
     if (isRunning())
     {
-      command_struct_ackermann_.steering   = command.steering_angle;
-      command_struct_ackermann_.lin   = command.speed;
-      command_struct_ackermann_.stamp = ros::Time::now();
-      command_ackermann_.writeFromNonRT (command_struct_ackermann_);
+      command_struct_four_wheel_steering_.front_steering   = command.front_steering_angle;
+      command_struct_four_wheel_steering_.rear_steering   = command.rear_steering_angle;
+      command_struct_four_wheel_steering_.lin   = command.speed;
+      command_struct_four_wheel_steering_.stamp = ros::Time::now();
+      command_four_wheel_steering_.writeFromNonRT (command_struct_four_wheel_steering_);
       ROS_DEBUG_STREAM_NAMED(name_,
                              "Added values to command. "
-                             << "Steering: "   << command_struct_ackermann_.steering << ", "
-                             << "Lin: "   << command_struct_ackermann_.lin << ", "
-                             << "Stamp: " << command_struct_ackermann_.stamp);
+                             << "Steering front : "   << command_struct_four_wheel_steering_.front_steering << ", "
+                             << "Steering rear : "   << command_struct_four_wheel_steering_.rear_steering << ", "
+                             << "Lin: "   << command_struct_four_wheel_steering_.lin << ", "
+                             << "Stamp: " << command_struct_four_wheel_steering_.stamp);
     }
     else
     {
@@ -501,7 +486,7 @@ namespace ackermann_controller{
     }
   }
 
-  bool AckermannController::getWheelNames(ros::NodeHandle& controller_nh,
+  bool FourWheelSteeringController::getWheelNames(ros::NodeHandle& controller_nh,
                               const std::string& wheel_param,
                               std::vector<std::string>& wheel_names)
   {
@@ -537,6 +522,7 @@ namespace ackermann_controller{
         for (int i = 0; i < wheel_list.size(); ++i)
         {
           wheel_names[i] = static_cast<std::string>(wheel_list[i]);
+          //ROS_INFO_STREAM("wheel name "<<i<<" " << wheel_names[i]);
         }
       }
       else if (wheel_list.getType() == XmlRpc::XmlRpcValue::TypeString)
@@ -550,11 +536,10 @@ namespace ackermann_controller{
             "' is neither a list of strings nor a string.");
         return false;
       }
-
       return true;
   }
 
-  void AckermannController::setOdomPubFields(ros::NodeHandle& root_nh, ros::NodeHandle& controller_nh)
+  void FourWheelSteeringController::setOdomPubFields(ros::NodeHandle& root_nh, ros::NodeHandle& controller_nh)
   {
     // Get and check params for covariances
     XmlRpc::XmlRpcValue pose_cov_list;
@@ -601,4 +586,4 @@ namespace ackermann_controller{
     tf_odom_pub_->msg_.transforms[0].header.frame_id = "odom";
   }
 
-} // namespace ackermann_controller
+} // namespace four_wheel_steering_controller

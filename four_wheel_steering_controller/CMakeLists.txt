@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 2.8.3)
-project(ackermann_controller)
+project(four_wheel_steering_controller)
 
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11")
 
@@ -10,7 +10,7 @@ add_custom_target(${PROJECT_NAME}_OTHER_FILES ALL WORKING_DIRECTORY ${PROJECT_SO
 set(${PROJECT_NAME}_CATKIN_DEPS
     controller_interface
     nav_msgs
-    ackermann_msgs
+    four_wheel_steering_msgs
     realtime_tools
     tf
     urdf_vehicle_kinematic)
@@ -27,7 +27,7 @@ include_directories(
   include ${catkin_INCLUDE_DIRS}
 )
 
-add_library(${PROJECT_NAME} src/ackermann_controller.cpp src/odometry.cpp src/speed_limiter.cpp)
+add_library(${PROJECT_NAME} src/four_wheel_steering_controller.cpp src/odometry.cpp src/speed_limiter.cpp)
 target_link_libraries(${PROJECT_NAME} ${catkin_LIBRARIES})
 
 install(TARGETS ${PROJECT_NAME}
@@ -36,29 +36,29 @@ install(TARGETS ${PROJECT_NAME}
   RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
   )
 
-catkin_install_python(PROGRAMS scripts/teleop_ackermann_joy.py
+catkin_install_python(PROGRAMS scripts/teleop_four_wheel_steering_joy.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 
-install(FILES ackermann_controller_plugins.xml
+install(FILES four_wheel_steering_controller_plugins.xml
     DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 
 if(CATKIN_ENABLE_TESTING)
   find_package(catkin REQUIRED COMPONENTS rostest std_srvs controller_manager tf)
 
-  add_executable(ackermann test/src/ackermann.cpp)
-  target_link_libraries(ackermann ${catkin_LIBRARIES})
+  add_executable(four_wheel_steering test/src/four_wheel_steering.cpp)
+  target_link_libraries(four_wheel_steering ${catkin_LIBRARIES})
 
-  add_dependencies(tests ackermann)
+  add_dependencies(tests four_wheel_steering)
 
-  add_rostest_gtest(ackermann_controller_test
-                    test/ackermann_controller.test
-                    test/src/ackermann_test.cpp)
-  target_link_libraries(ackermann_controller_test ${catkin_LIBRARIES})
+  add_rostest_gtest(four_wheel_steering_controller_test
+                    test/four_wheel_steering_controller.test
+                    test/src/four_wheel_steering_test.cpp)
+  target_link_libraries(four_wheel_steering_controller_test ${catkin_LIBRARIES})
 
-  add_rostest_gtest(ackermann_wrong_config_test
-                    test/ackermann_wrong_config.test
-                    test/src/ackermann_wrong_config.cpp)
-  target_link_libraries(ackermann_wrong_config_test ${catkin_LIBRARIES})
-  #add_rostest(test/ackermann_radius_param.test)
+  add_rostest_gtest(four_wheel_steering_wrong_config_test
+                    test/four_wheel_steering_wrong_config.test
+                    test/src/four_wheel_steering_wrong_config.cpp)
+  target_link_libraries(four_wheel_steering_wrong_config_test ${catkin_LIBRARIES})
+  #add_rostest(test/four_wheel_steering_radius_param.test)
 
 endif()
