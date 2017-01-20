@@ -1,0 +1,12 @@
+Source: ros-indigo-four-wheel-steering-controller
+Section: misc
+Priority: extra
+Maintainer: Vincent Rousseau <vincent.rousseau@irstea.fr>
+Build-Depends: debhelper (>= 9.0.0), ros-indigo-catkin, ros-indigo-controller-interface, ros-indigo-four-wheel-steering-msgs, ros-indigo-nav-msgs, ros-indigo-realtime-tools, ros-indigo-tf, ros-indigo-urdf-vehicle-kinematic
+Homepage: 
+Standards-Version: 3.9.2
+
+Package: ros-indigo-four-wheel-steering-controller
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, ros-indigo-controller-interface, ros-indigo-four-wheel-steering-msgs, ros-indigo-nav-msgs, ros-indigo-realtime-tools, ros-indigo-tf, ros-indigo-urdf-vehicle-kinematic
+Description: Controller for a four wheel steering mobile base.
