@@ -1,0 +1,27 @@
+ros-indigo-four-wheel-steering-msgs (0.2.1-0trusty) trusty; urgency=high
+
+
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Tue, 31 Jan 2017 23:00:00 -0000
+
+ros-indigo-four-wheel-steering-msgs (0.2.0-0trusty) trusty; urgency=high
+
+  * Update CMakelists and package format
+  * [four_wheel_steering_msgs] First version from ackermann_msgs refs #2
+  * Contributors: Vincent Rousseau
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Wed, 18 Jan 2017 23:00:00 -0000
+
+ros-indigo-four-wheel-steering-msgs (0.1.2-0trusty) trusty; urgency=high
+
+
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Sun, 04 Sep 2016 22:00:00 -0000
+
+ros-indigo-four-wheel-steering-msgs (0.1.1-0trusty) trusty; urgency=high
+
+
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Tue, 30 Aug 2016 22:00:00 -0000
+
+
