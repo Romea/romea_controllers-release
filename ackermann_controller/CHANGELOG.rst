@@ -2,6 +2,13 @@
 Changelog for package ackermann_controller
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.1 (2017-02-01)
+------------------
+* [ackermann] Change package description
+* Update computation of virtual steering
+* Update test for four_wheel_steering_controller
+* Contributors: Vincent Rousseau
+
 0.2.0 (2017-01-19)
 ------------------
 * [4ws] Only enable twist cmd
