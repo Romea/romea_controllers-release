@@ -1,0 +1,46 @@
+ros-indigo-four-wheel-steering-controller (0.2.2-0saucy) saucy; urgency=high
+
+  * Add test depend
+  * Contributors: Vincent Rousseau
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Wed, 01 Feb 2017 23:00:00 -0000
+
+ros-indigo-four-wheel-steering-controller (0.2.1-0saucy) saucy; urgency=high
+
+  * [4ws] Add crab travel test
+  * [4ws] Update test
+  * [4ws] Add test on non symmetric steering
+  * [4ws] Revert to use only rear speed for odom
+  * [4ws] Use front and rear speed for odometry
+  * Update computation of virtual steering
+  * [4ws] Remove debug
+  * [4ws] Update command with 4ws msg
+  * Update test for four_wheel_steering_controller
+  * Contributors: Vincent Rousseau
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Tue, 31 Jan 2017 23:00:00 -0000
+
+ros-indigo-four-wheel-steering-controller (0.2.0-0saucy) saucy; urgency=high
+
+  * [4ws] Only enable twist cmd
+  * [4ws] Fix velocity cmd inversion
+  * [4ws] Integrate position using x and y velocity
+  * [4ws] use linear x and y for speed
+  * [4ws] update odometry formula
+  * Contributors: Vincent Rousseau
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Wed, 18 Jan 2017 23:00:00 -0000
+
+ros-indigo-four-wheel-steering-controller (0.1.2-0saucy) saucy; urgency=high
+
+
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Sun, 04 Sep 2016 22:00:00 -0000
+
+ros-indigo-four-wheel-steering-controller (0.1.1-0saucy) saucy; urgency=high
+
+
+
+ -- Vincent Rousseau <vincent.rousseau@irstea.fr>  Tue, 30 Aug 2016 22:00:00 -0000
+
+
