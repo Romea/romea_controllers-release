@@ -2,6 +2,9 @@
 Changelog for package ackermann_controller
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+0.2.2 (2017-02-02)
+------------------
+
 0.2.1 (2017-02-01)
 ------------------
 * [ackermann] Change package description
